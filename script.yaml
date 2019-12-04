@@ -21,7 +21,23 @@ Parameters:
     Type: AWS::EC2::KeyPair::KeyName
     Default: aamirKP1
     ConstraintDescription: must be the name of an existing EC2 KeyPair
+  
+  ClusterName:
+    Type: String
+    Description: Unique name of the cluster
 
+  TG:
+    Type: String
+    Description: Name of the target group for the Apllication LoadBalancer
+
+  ImageUrl:
+    Type: String
+    Description: The url of a docker image that contains the application
+
+  DBpassword:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: MYSQL_ROOT_PASSWORD
+    ConstraintDescription: Password must be greater than 8 latters
     
   InstaceTypeParam:
     Type: String
@@ -46,18 +62,18 @@ Resources:
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties: 
-      ClusterName: ec2-cluster
+      ClusterName: !Ref "ClusterName"
 
 
   ContainerInstances:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
-      IamInstanceProfile: !Ref "EC2InstanceProfile"
-      InstanceType: !Ref "InstaceTypeParam"
-      KeyName: !Ref "KeyName"
-      ImageId: !Ref "ECSAMI"
+      IamInstanceProfile: !Ref 'EC2InstanceProfile'
+      InstanceType: !Ref 'InstaceTypeParam'
+      KeyName: !Ref 'KeyName'
+      ImageId: !Ref 'ECSAMI'
       SecurityGroups:
-          - Ref: "SG"
+          - Ref: 'SG'
       AssociatePublicIpAddress: true
 
 
@@ -118,7 +134,8 @@ Resources:
       NetworkMode: 'bridge'
       ContainerDefinitions:
         - Name:  php-apache
-          Image: '020046395185.dkr.ecr.us-east-1.amazonaws.com/php-apache-image:latest'
+          Image: !Ref 'ImageUrl' #improved 
+          #Image: '020046395185.dkr.ecr.us-east-1.amazonaws.com/php-apache-image:latest'
           PortMappings:
             - ContainerPort: 80
               HostPort: 0
@@ -132,6 +149,7 @@ Resources:
       Cpu: '256'
       Memory: '512'
       NetworkMode: 'bridge'
+      TaskRoleArn: !Ref 'EC2InstanceProfile'
       ContainerDefinitions:  
         - Name:  mysql-php
           Image: 'mysql:latest'
@@ -143,13 +161,17 @@ Resources:
           MemoryReservation: 128
           Environment:
             - Name: MYSQL_ROOT_PASSWORD
-              Value: pythonDeveloper1122
+              Value: !Ref "DBpassword"
+          # Secrets:
+          #   - ValueFrom: !Ref "DBpassword"
+          #     Name: MYSQL_ROOT_PASSWORD
+              
       
   ServiceA:
     Type: AWS::ECS::Service
     DependsOn: LoadBalancerListenerRule
     Properties:
-      ServiceName: "app-svc"
+      ServiceName: 'app-svc'
       Cluster: !Ref 'ECSCluster'
       DeploymentConfiguration:
         MaximumPercent: 200
@@ -193,7 +215,7 @@ Resources:
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
-      Name: 'TG'
+      Name: !Ref TG #problem
       Port: 80
       Protocol: HTTP
       UnhealthyThresholdCount: 2
@@ -201,7 +223,6 @@ Resources:
 
   LoadBalancerListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
-    DependsOn: TargetGroup
     Properties:
       LoadBalancerArn: !Ref LoadBalancer
       Port: 80
@@ -214,7 +235,6 @@ Resources:
 
   LoadBalancerListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    DependsOn: LoadBalancerListener
     Properties:
       Actions:
         - TargetGroupArn: !Ref 'TargetGroup'
@@ -228,7 +248,7 @@ Resources:
 
 
 
-EC2InstanceProfile:
+  EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
@@ -242,7 +262,7 @@ EC2InstanceProfile:
         Statement:
         - Effect: Allow
           Principal:
-            Service: [ec2.amazonaws.com]
+            Service: [ec2.amazonaws.com, ecs-tasks.amazonaws.com]
           Action: ['sts:AssumeRole']
       Path: /
       Policies:
@@ -263,6 +283,14 @@ EC2InstanceProfile:
               - 'ecr:GetAuthorizationToken'
               - 'ecr:BatchGetImage'
               - 'ecr:GetDownloadUrlForLayer'
+            Resource: '*'
+
+      - PolicyName: ecs-seceret
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - 'ssm:*' 
             Resource: '*'
             
 
